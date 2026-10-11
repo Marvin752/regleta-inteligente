@@ -26,7 +26,14 @@ def al_recibir(client, userdata, msg):
         comando = json.loads(msg.payload.decode())
     except json.JSONDecodeError:
         return
-    if isinstance(comando, dict) and comando.get("accion") == "REARMAR" and estado == "CORTE":
+    if not isinstance(comando, dict):
+        return
+
+    accion = comando.get("accion")
+    if accion == "CORTAR" and estado == "NORMAL":
+        estado = "CORTE"
+        print(">>> Relé abierto manualmente desde la app")
+    elif accion == "REARMAR" and estado == "CORTE":
         estado = "NORMAL"
         print(">>> Relé rearmado desde la app")
 

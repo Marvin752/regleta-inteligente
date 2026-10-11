@@ -18,12 +18,20 @@
       border-radius: 14px;
       width: min(92vw, 380px);
     }
+    .logo {
+      display: block;
+      width: 200px;
+      margin: 0 auto 1.25rem;
+      border-radius: 14px;
+    }
   </style>
 </head>
 <body>
   <form class="card p-4" method="post" action="/login">
-    <h1 class="h4 fw-bold mb-1">⚡ Monitor de energía</h1>
-    <p class="text-secondary mb-4">Ingresá para ver el panel.</p>
+    <img class="logo" src="{{ url_for('static', filename='img/logo-proyecto.jpeg') }}" alt="Logo del proyecto">
+
+    <h1 class="h4 fw-bold mb-1 text-center">Monitor de energía</h1>
+    <p class="text-secondary mb-4 text-center">Ingresá para ver el panel.</p>
 
     {% if error %}
       <div class="alert alert-danger py-2">{{ error }}</div>

@@ -1,0 +1,479 @@
+{% extends "base.html" %}
+
+{% block titulo %}Reportes · Monitor de energía{% endblock %}
+
+{% block contenido %}
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
+    <div>
+      <h1 class="h4 fw-bold mb-1">Reportes</h1>
+      <div class="etiqueta" id="rango">--</div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <div class="btn-group" role="group" aria-label="Período">
+        <button type="button" class="btn btn-outline-primary active" data-periodo="dia">Día</button>
+        <button type="button" class="btn btn-outline-primary" data-periodo="semana">Semana</button>
+        <button type="button" class="btn btn-outline-primary" data-periodo="mes">Mes</button>
+        <button type="button" class="btn btn-outline-primary" data-periodo="anio">Año</button>
+      </div>
+      <input type="date" id="fecha" class="form-control" style="width: auto;" aria-label="Fecha">
+      <button type="button" id="boton-pdf" class="btn btn-primary" data-usuario="{{ usuario }}" disabled>Descargar PDF</button>
+    </div>
+  </div>
+
+  <div id="vacio" class="card p-4 text-center d-none" style="color: var(--tenue);">
+    No hay lecturas guardadas en este período.
+  </div>
+
+  <div id="reporte">
+    <div class="row g-3 mb-3">
+      <div class="col-6 col-lg-3">
+        <div class="card p-3 h-100">
+          <div class="etiqueta">Lecturas</div>
+          <div class="valor"><span id="total">--</span></div>
+        </div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card p-3 h-100">
+          <div class="etiqueta">Máximo</div>
+          <div class="valor"><span id="maximo">--</span> <small>A</small></div>
+        </div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card p-3 h-100">
+          <div class="etiqueta">Promedio</div>
+          <div class="valor"><span id="promedio">--</span> <small>A</small></div>
+        </div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card p-3 h-100">
+          <div class="etiqueta">Cortes</div>
+          <div class="valor"><span id="cortes">--</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card p-3 mb-3">
+      <div class="etiqueta mb-2" id="titulo-grafica">Consumo</div>
+      <div class="grafica-caja"><canvas id="grafica"></canvas></div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-7">
+        <div class="card p-3 h-100">
+          <div class="etiqueta mb-2" id="titulo-detalle">Detalle</div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead>
+                <tr>
+                  <th id="columna-grupo">Hora</th>
+                  <th class="text-end">Lecturas</th>
+                  <th class="text-end">Promedio</th>
+                  <th class="text-end">Máximo</th>
+                </tr>
+              </thead>
+              <tbody id="filas-detalle"></tbody>
+            </table>
+          </div>
+          <div id="paginas-detalle" class="mt-auto pt-3"></div>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="card p-3 h-100">
+          <div class="etiqueta mb-2">Cortes del período</div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead>
+                <tr><th>Fecha</th><th>Hora</th><th class="text-end">Corriente</th></tr>
+              </thead>
+              <tbody id="filas-cortes"></tbody>
+            </table>
+          </div>
+          <div id="sin-cortes" class="small mt-2 d-none" style="color: var(--tenue);">
+            Sin cortes en este período.
+          </div>
+          <div id="paginas-cortes" class="mt-auto pt-3"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <script>
+    const POR_PAGINA = 10;
+    const USUARIO = $("boton-pdf").dataset.usuario;
+    const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    const NOMBRE_PERIODO = { dia: "Diario", semana: "Semanal", mes: "Mensual", anio: "Anual" };
+    const NOMBRE_GRUPO = { dia: "Hora", semana: "Día", mes: "Día", anio: "Mes" };
+
+    let periodo = "dia";
+    let ultimoReporte = null;   // lo que está en pantalla; de aquí sale el PDF
+
+    // ---------- Formato ----------
+
+    // "2026-10-11" -> "11/10/2026"
+    const fechaCorta = (iso) => iso.slice(8, 10) + "/" + iso.slice(5, 7) + "/" + iso.slice(0, 4);
+    const diaMes = (iso) => iso.slice(8, 10) + "/" + iso.slice(5, 7);
+    const miles = (n) => Number(n).toLocaleString("es-GT");
+
+    function hoyLocal() {
+      const d = new Date();
+      const dos = (n) => String(n).padStart(2, "0");
+      return d.getFullYear() + "-" + dos(d.getMonth() + 1) + "-" + dos(d.getDate());
+    }
+
+    // La etiqueta llega como "14" (hora), "2026-10-11" (día) o "2026-10" (mes)
+    function etiquetaGrupo(etiqueta, per) {
+      if (per === "dia") return etiqueta + ":00";
+      if (per === "anio") return MESES[Number(etiqueta.slice(5, 7)) - 1];
+      return diaMes(etiqueta);
+    }
+
+    function textoRango(r) {
+      if (r.periodo === "anio") return "Año " + r.desde.slice(0, 4);
+      if (r.desde === r.hasta) return fechaCorta(r.desde);
+      return "Del " + fechaCorta(r.desde) + " al " + fechaCorta(r.hasta);
+    }
+
+    // ---------- Paginación ----------
+
+    // Muestra 'datos' de 10 en 10 dentro de una tabla, con botones Anterior / Siguiente.
+    function crearPaginador(idCuerpo, idControles, pintarFila) {
+      let datos = [];
+      let pagina = 1;
+
+      function pintar() {
+        const totalPaginas = Math.max(1, Math.ceil(datos.length / POR_PAGINA));
+        pagina = Math.min(Math.max(pagina, 1), totalPaginas);
+
+        const cuerpo = $(idCuerpo);
+        cuerpo.replaceChildren();
+        const inicio = (pagina - 1) * POR_PAGINA;
+        for (const dato of datos.slice(inicio, inicio + POR_PAGINA)) {
+          pintarFila(cuerpo.insertRow(), dato);
+        }
+
+        const controles = $(idControles);
+        controles.replaceChildren();
+        if (totalPaginas === 1) return;   // con una sola página no hacen falta botones
+
+        const barra = document.createElement("div");
+        barra.className = "d-flex justify-content-between align-items-center";
+
+        const boton = (texto, destino, deshabilitado) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "btn btn-sm btn-outline-secondary";
+          b.textContent = texto;
+          b.disabled = deshabilitado;
+          b.addEventListener("click", () => { pagina = destino; pintar(); });
+          return b;
+        };
+
+        const texto = document.createElement("span");
+        texto.className = "small";
+        texto.style.color = "var(--tenue)";
+        texto.textContent = "Página " + pagina + " de " + totalPaginas;
+
+        barra.append(
+          boton("‹ Anterior", pagina - 1, pagina === 1),
+          texto,
+          boton("Siguiente ›", pagina + 1, pagina === totalPaginas),
+        );
+        controles.appendChild(barra);
+      }
+
+      return {
+        cargar(nuevos) { datos = nuevos; pagina = 1; pintar(); },
+      };
+    }
+
+    function celdaDerecha(fila, texto, clase) {
+      const celda = fila.insertCell();
+      celda.className = "text-end" + (clase ? " " + clase : "");
+      celda.textContent = texto;
+    }
+
+    const tablaDetalle = crearPaginador("filas-detalle", "paginas-detalle", (fila, s) => {
+      fila.insertCell().textContent = etiquetaGrupo(s.etiqueta, periodo);
+      celdaDerecha(fila, miles(s.lecturas));
+      celdaDerecha(fila, num(s.promedio) + " A");
+      celdaDerecha(fila, num(s.maximo) + " A");
+    });
+
+    const tablaCortes = crearPaginador("filas-cortes", "paginas-cortes", (fila, c) => {
+      fila.insertCell().textContent = fechaCorta(c.fecha.slice(0, 10));
+      fila.insertCell().textContent = c.fecha.slice(11);
+      celdaDerecha(fila, num(c.corriente) + " A", "text-danger");
+    });
+
+    // ---------- Gráfica ----------
+
+    function datosGrafica(r, colores) {
+      return {
+        labels: r.serie.map((s) => etiquetaGrupo(s.etiqueta, r.periodo)),
+        datasets: [
+          {
+            label: "Promedio (A)",
+            data: r.serie.map((s) => s.promedio),
+            backgroundColor: colores.barras,
+            borderRadius: 4,
+          },
+          {
+            type: "line",
+            label: "Máximo (A)",
+            data: r.serie.map((s) => s.maximo),
+            borderColor: colores.maximo,
+            backgroundColor: colores.maximo,
+            tension: 0.3,
+            pointRadius: 3,
+          },
+          {
+            type: "line",
+            label: "Límite (A)",
+            data: r.serie.map(() => r.resumen.limite),
+            borderColor: colores.limite,
+            borderDash: [6, 6],
+            pointRadius: 0,
+          },
+        ],
+      };
+    }
+
+    const COLORES_PANTALLA = { barras: "rgba(77, 163, 255, .55)", maximo: "#ffc857", limite: "#ff5d6c" };
+    const COLORES_PAPEL = { barras: "#4a90d9", maximo: "#e08a00", limite: "#d62839" };
+
+    const grafica = new Chart($("grafica"), {
+      type: "bar",
+      data: { labels: [], datasets: [] },
+      options: {
+        animation: false,
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true } },
+      },
+    });
+
+    // ---------- Pantalla ----------
+
+    function pintarReporte(r) {
+      $("rango").textContent = textoRango(r);
+
+      const hayDatos = r.resumen.total > 0;
+      $("vacio").classList.toggle("d-none", hayDatos);
+      $("reporte").classList.toggle("d-none", !hayDatos);
+      $("boton-pdf").disabled = !hayDatos;
+      if (!hayDatos) return;
+
+      $("total").textContent = miles(r.resumen.total);
+      $("maximo").textContent = num(r.resumen.maximo);
+      $("promedio").textContent = num(r.resumen.promedio);
+      $("cortes").textContent = r.resumen.cortes;
+
+      const grupo = NOMBRE_GRUPO[r.periodo];
+      $("titulo-grafica").textContent = "Consumo por " + grupo.toLowerCase();
+      $("titulo-detalle").textContent = "Detalle por " + grupo.toLowerCase();
+      $("columna-grupo").textContent = grupo;
+
+      grafica.data = datosGrafica(r, COLORES_PANTALLA);
+      grafica.update();
+
+      tablaDetalle.cargar(r.serie);
+      tablaCortes.cargar(r.cortes);
+      $("sin-cortes").classList.toggle("d-none", r.cortes.length > 0);
+    }
+
+    async function cargar() {
+      const fecha = $("fecha").value || hoyLocal();
+      try {
+        ultimoReporte = await pedir("/api/reporte?periodo=" + periodo + "&fecha=" + fecha);
+        pintarReporte(ultimoReporte);
+      } catch (error) {
+        ultimoReporte = null;
+        $("boton-pdf").disabled = true;
+        $("rango").textContent = "No se pudo cargar el reporte";
+      }
+    }
+
+    // ---------- PDF ----------
+
+    // Dibuja la misma gráfica con colores para papel blanco y la devuelve como imagen.
+    function imagenGrafica(r) {
+      const lienzo = document.createElement("canvas");
+      lienzo.width = 1100;
+      lienzo.height = 420;
+      const tinta = "#333333";
+      const temporal = new Chart(lienzo, {
+        type: "bar",
+        data: datosGrafica(r, COLORES_PAPEL),
+        options: {
+          animation: false,
+          responsive: false,
+          devicePixelRatio: 2,
+          plugins: { legend: { labels: { color: tinta } } },
+          scales: {
+            x: { ticks: { color: tinta }, grid: { color: "#e3e6ec" } },
+            y: { beginAtZero: true, ticks: { color: tinta }, grid: { color: "#e3e6ec" } },
+          },
+        },
+      });
+      const imagen = temporal.toBase64Image("image/png", 1);
+      temporal.destroy();
+      return imagen;
+    }
+
+    function descargarPDF() {
+      const r = ultimoReporte;
+      if (!r || r.resumen.total === 0) return;
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: "mm", format: "letter" });
+      const ancho = doc.internal.pageSize.getWidth();
+      const alto = doc.internal.pageSize.getHeight();
+      const margen = 15;
+      const util = ancho - margen * 2;
+      const AZUL = [24, 32, 50];
+      const GRIS = [110, 120, 140];
+
+      // Encabezado
+      doc.setFillColor(...AZUL);
+      doc.rect(0, 0, ancho, 30, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(17);
+      doc.text("Monitor de energía", margen, 14);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      doc.text("Reporte " + NOMBRE_PERIODO[r.periodo].toLowerCase() + " de consumo", margen, 22);
+      doc.setFontSize(10);
+      doc.text(textoRango(r), ancho - margen, 14, { align: "right" });
+      doc.text("Proyecto IoT · ESP32", ancho - margen, 22, { align: "right" });
+
+      // Tarjetas de resumen
+      const tarjetas = [
+        ["Lecturas", miles(r.resumen.total)],
+        ["Máximo", num(r.resumen.maximo) + " A"],
+        ["Promedio", num(r.resumen.promedio) + " A"],
+        ["Cortes", String(r.resumen.cortes)],
+      ];
+      const separacion = 4;
+      const anchoTarjeta = (util - separacion * 3) / 4;
+      let y = 38;
+      tarjetas.forEach(([titulo, valor], i) => {
+        const x = margen + i * (anchoTarjeta + separacion);
+        doc.setDrawColor(215, 220, 230);
+        doc.setFillColor(246, 248, 251);
+        doc.roundedRect(x, y, anchoTarjeta, 20, 2, 2, "FD");
+        doc.setTextColor(...GRIS);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.text(titulo.toUpperCase(), x + 4, y + 7);
+        doc.setTextColor(...AZUL);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(15);
+        doc.text(valor, x + 4, y + 15.5);
+      });
+      y += 28;
+
+      // Gráfica
+      const grupo = NOMBRE_GRUPO[r.periodo];
+      const titulo = (texto, posicion) => {
+        doc.setTextColor(...AZUL);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text(texto, margen, posicion);
+      };
+      titulo("Consumo por " + grupo.toLowerCase(), y);
+      const altoGrafica = util * 420 / 1100;
+      doc.addImage(imagenGrafica(r), "PNG", margen, y + 3, util, altoGrafica);
+      y += altoGrafica + 12;
+
+      const estiloTabla = {
+        margin: { left: margen, right: margen, bottom: 16 },
+        styles: { font: "helvetica", fontSize: 9, cellPadding: 2 },
+        headStyles: { fillColor: AZUL, textColor: 255 },
+        alternateRowStyles: { fillColor: [246, 248, 251] },
+      };
+      const derecha = { halign: "right" };
+      const aLaDerecha = (texto) => ({ content: texto, styles: derecha });
+
+      // Tabla de detalle (en el PDF va completa, sin paginar)
+      titulo("Detalle por " + grupo.toLowerCase(), y);
+      doc.autoTable({
+        ...estiloTabla,
+        startY: y + 3,
+        head: [[grupo, aLaDerecha("Lecturas"), aLaDerecha("Promedio"), aLaDerecha("Máximo")]],
+        body: r.serie.map((s) => [
+          etiquetaGrupo(s.etiqueta, r.periodo),
+          miles(s.lecturas),
+          num(s.promedio) + " A",
+          num(s.maximo) + " A",
+        ]),
+        columnStyles: { 1: derecha, 2: derecha, 3: derecha },
+      });
+      y = doc.lastAutoTable.finalY + 10;
+
+      // Tabla de cortes
+      if (y > alto - 40) { doc.addPage(); y = 20; }
+      titulo("Cortes del período (" + r.cortes.length + ")", y);
+      if (r.cortes.length === 0) {
+        doc.setTextColor(...GRIS);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.text("Sin cortes en este período.", margen, y + 7);
+      } else {
+        doc.autoTable({
+          ...estiloTabla,
+          startY: y + 3,
+          head: [["#", "Fecha", "Hora", aLaDerecha("Corriente")]],
+          body: r.cortes.map((c, i) => [
+            i + 1,
+            fechaCorta(c.fecha.slice(0, 10)),
+            c.fecha.slice(11),
+            num(c.corriente) + " A",
+          ]),
+          columnStyles: { 0: { cellWidth: 12 }, 3: derecha },
+        });
+      }
+
+      // Pie de página en todas las hojas
+      const ahora = new Date();
+      const generado = "Generado el " + ahora.toLocaleDateString("es-GT") + " a las " +
+        ahora.toLocaleTimeString("es-GT", { hour: "2-digit", minute: "2-digit" }) +
+        " por " + USUARIO;
+      const hojas = doc.getNumberOfPages();
+      for (let i = 1; i <= hojas; i++) {
+        doc.setPage(i);
+        doc.setDrawColor(215, 220, 230);
+        doc.line(margen, alto - 12, ancho - margen, alto - 12);
+        doc.setTextColor(...GRIS);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.text(generado, margen, alto - 7);
+        doc.text("Página " + i + " de " + hojas, ancho - margen, alto - 7, { align: "right" });
+      }
+
+      const sufijo = r.periodo === "anio" ? r.desde.slice(0, 4) : r.desde;
+      doc.save("reporte-energia-" + r.periodo + "-" + sufijo + ".pdf");
+    }
+
+    // ---------- Eventos ----------
+
+    for (const boton of document.querySelectorAll("[data-periodo]")) {
+      boton.addEventListener("click", () => {
+        periodo = boton.dataset.periodo;
+        for (const otro of document.querySelectorAll("[data-periodo]")) {
+          otro.classList.toggle("active", otro === boton);
+        }
+        cargar();
+      });
+    }
+
+    $("boton-pdf").addEventListener("click", descargarPDF);
+    $("fecha").value = hoyLocal();
+    $("fecha").addEventListener("change", cargar);
+    cargar();
+  </script>
+{% endblock %}
