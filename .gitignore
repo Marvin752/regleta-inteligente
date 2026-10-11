@@ -1,0 +1,4 @@
+.venv/
+.env
+lecturas.db
+__pycache__/

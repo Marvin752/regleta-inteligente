@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="es" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Monitor de energía · Proyecto IoT</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --fondo: #0f1420;
+      --panel: #182032;
+      --borde: #263149;
+      --tenue: #8a97b1;
+    }
+    body { background: var(--fondo); }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--borde);
+      border-radius: 14px;
+    }
+    .etiqueta {
+      font-size: .75rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--tenue);
+    }
+    .valor {
+      font-size: 2rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .valor small { font-size: 1rem; font-weight: 400; color: var(--tenue); }
+    .grafica-caja { height: 300px; }
+    .table { --bs-table-bg: transparent; font-variant-numeric: tabular-nums; }
+    .aviso-corte {
+      background: rgba(255, 93, 108, .12);
+      border: 1px solid #ff5d6c;
+      border-radius: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="navbar border-bottom mb-4" style="border-color: var(--borde) !important;">
+    <div class="container">
+      <span class="navbar-brand fw-bold">⚡ Monitor de energía</span>
+      <div class="d-flex align-items-center gap-3">
+        <span id="estado" class="badge fs-6 text-bg-secondary">SIN DATOS</span>
+        <span class="small" style="color: var(--tenue);">{{ usuario }}</span>
+        <form method="post" action="/logout" class="m-0">
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Salir</button>
+        </form>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container pb-5">
+
+    <div id="aviso" class="aviso-corte p-3 mb-3 d-none">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div>
+          <div class="fw-bold text-danger">Relé abierto por sobrecorriente</div>
+          <div class="small" style="color: var(--tenue);">
+            El circuito está sin energía. Revisá la carga antes de reactivar.
+          </div>
+        </div>
+        <button id="boton-rearmar" class="btn btn-danger">Reactivar relé</button>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-6 col-lg-3">
+        <div class="card p-3 h-100">
+          <div class="etiqueta">Corriente actual</div>
+          <div class="valor"><span id="actual">--</span> <small>A</small></div>
+        </div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card p-3 h-100">
+          <div class="etiqueta">Máximo de hoy</div>
+          <div class="valor"><span id="maximo">--</span> <small>A</small></div>
+        </div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card p-3 h-100">
+          <div class="etiqueta">Promedio de hoy</div>
+          <div class="valor"><span id="promedio">--</span> <small>A</small></div>
+        </div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card p-3 h-100">
+          <div class="etiqueta">Cortes de hoy</div>
+          <div class="valor"><span id="cortes">--</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card p-3 mb-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="etiqueta">Consumo en tiempo real</div>
+        <div class="etiqueta">Límite: <span id="limite">--</span> A</div>
+      </div>
+      <div class="grafica-caja"><canvas id="grafica"></canvas></div>
+    </div>
+
+    <div class="card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="etiqueta">Últimas lecturas</div>
+        <div class="etiqueta"><span id="total">0</span> lecturas hoy</div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Hora</th><th>Dispositivo</th>
+              <th class="text-end">Corriente</th><th class="text-end">Estado</th>
+            </tr>
+          </thead>
+          <tbody id="filas"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const num = (v) => (v === null || v === undefined) ? "--" : Number(v).toFixed(2);
+    const hora = (fecha) => fecha.slice(11);
+    const alerta = Swal.mixin({ background: "#182032", color: "#e6eaf2" });
+
+    // Pide datos a la API; si la sesión venció, manda al login
+    async function pedir(url, opciones) {
+      const respuesta = await fetch(url, opciones);
+      if (respuesta.status === 401) {
+        window.location.href = "/login";
+        throw new Error("Sesión vencida");
+      }
+      return respuesta.json();
+    }
+
+    Chart.defaults.color = "#8a97b1";
+    Chart.defaults.borderColor = "#263149";
+
+    const grafica = new Chart($("grafica"), {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: "Corriente (A)",
+            data: [],
+            borderColor: "#4da3ff",
+            backgroundColor: "rgba(77, 163, 255, .15)",
+            fill: true,
+            tension: 0.3,
+            pointRadius: 2,
+          },
+          {
+            label: "Límite (A)",
+            data: [],
+            borderColor: "#ff5d6c",
+            borderDash: [6, 6],
+            pointRadius: 0,
+          },
+        ],
+      },
+      options: {
+        animation: false,
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true } },
+      },
+    });
+
+    function pintarEstado(texto, clase) {
+      const insignia = $("estado");
+      insignia.textContent = texto;
+      insignia.className = "badge fs-6 " + clase;
+    }
+
+    function pintarResumen(r) {
+      $("maximo").textContent = num(r.maximo);
+      $("promedio").textContent = num(r.promedio);
+      $("cortes").textContent = r.cortes ?? "--";
+      $("total").textContent = r.total ?? 0;
+
+      if (!r.ultima) {
+        pintarEstado("SIN DATOS", "text-bg-secondary");
+        $("aviso").classList.add("d-none");
+        return;
+      }
+      const enCorte = r.ultima.estado === "CORTE";
+      $("actual").textContent = num(r.ultima.corriente);
+      $("actual").className = enCorte ? "text-danger" : "text-success";
+      $("limite").textContent = num(r.ultima.limite);
+      pintarEstado(r.ultima.estado, enCorte ? "text-bg-danger" : "text-bg-success");
+      $("aviso").classList.toggle("d-none", !enCorte);
+    }
+
+    function pintarGrafica(lecturas) {
+      const orden = [...lecturas].reverse();   // la API manda la más nueva primero
+      grafica.data.labels = orden.map((l) => hora(l.fecha));
+      grafica.data.datasets[0].data = orden.map((l) => l.corriente);
+      grafica.data.datasets[1].data = orden.map((l) => l.limite);
+      grafica.update();
+    }
+
+    function pintarTabla(lecturas) {
+      const cuerpo = $("filas");
+      cuerpo.replaceChildren();
+      for (const l of lecturas) {
+        const fila = cuerpo.insertRow();
+        fila.insertCell().textContent = hora(l.fecha);
+        fila.insertCell().textContent = l.dispositivo;
+
+        const corriente = fila.insertCell();
+        corriente.className = "text-end";
+        corriente.textContent = num(l.corriente) + " A";
+
+        const estado = fila.insertCell();
+        estado.className = "text-end";
+        const insignia = document.createElement("span");
+        insignia.className = "badge " + (l.estado === "CORTE" ? "text-bg-danger" : "text-bg-success");
+        insignia.textContent = l.estado;
+        estado.appendChild(insignia);
+      }
+    }
+
+    async function actualizar() {
+      try {
+        const [resumen, lecturas] = await Promise.all([
+          pedir("/api/resumen"),
+          pedir("/api/lecturas"),
+        ]);
+        pintarResumen(resumen);
+        pintarGrafica(lecturas);
+        pintarTabla(lecturas);
+      } catch (error) {
+        pintarEstado("SIN CONEXIÓN", "text-bg-warning");
+      }
+    }
+
+    $("boton-rearmar").addEventListener("click", async () => {
+      const decision = await alerta.fire({
+        icon: "warning",
+        title: "¿Reactivar el relé?",
+        text: "El circuito volverá a tener energía. Confirmá que la carga ya fue revisada.",
+        showCancelButton: true,
+        confirmButtonText: "Sí, reactivar",
+        cancelButtonText: "Cancelar",
+        confirmButtonColor: "#dc3545",
+      });
+      if (!decision.isConfirmed) return;
+
+      const boton = $("boton-rearmar");
+      boton.disabled = true;
+      try {
+        const resultado = await pedir("/api/rearmar", { method: "POST" });
+        alerta.fire({
+          icon: resultado.ok ? "success" : "info",
+          title: resultado.mensaje,
+          timer: 2000,
+          showConfirmButton: false,
+        });
+      } catch (error) {
+        alerta.fire({ icon: "error", title: "No se pudo enviar la orden" });
+      } finally {
+        boton.disabled = false;
+      }
+    });
+
+    actualizar();
+    setInterval(actualizar, 2000);
+  </script>
+</body>
+</html>
