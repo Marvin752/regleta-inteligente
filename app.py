@@ -89,6 +89,41 @@ def consultar(sql, params=()):
     return filas
 
 
+# Cada corte es la primera lectura en CORTE después de una que no lo era.
+# El tipo se deduce de esa lectura: el dispositivo manda el pico que lo
+# provocó (mayor al límite) si fue por sobrecorriente, y 0 A si fue manual.
+SQL_CORTES = (
+    "SELECT fecha, corriente, "
+    "  CASE WHEN corriente > limite THEN 'LIMITE' ELSE 'MANUAL' END AS motivo "
+    "FROM ("
+    "  SELECT id, fecha, corriente, limite, estado, LAG(estado) OVER (ORDER BY id) AS anterior"
+    "  FROM lecturas WHERE fecha >= ? AND fecha < ?"
+    ") WHERE estado = 'CORTE' AND (anterior IS NULL OR anterior <> 'CORTE') "
+    "ORDER BY id DESC"
+)
+
+
+def contar_motivos(cortes):
+    limite = sum(1 for c in cortes if c["motivo"] == "LIMITE")
+    return {"cortes": len(cortes), "cortes_limite": limite, "cortes_manual": len(cortes) - limite}
+
+
+def motivo_corte_actual():
+    """Por qué está abierto el relé ahora: 'LIMITE', 'MANUAL' o None."""
+    if estado_actual() != "CORTE":
+        return None
+    ultimo = consultar(
+        "SELECT corriente, limite FROM ("
+        "  SELECT id, corriente, limite, estado, LAG(estado) OVER (ORDER BY id) AS anterior"
+        "  FROM lecturas"
+        ") WHERE estado = 'CORTE' AND (anterior IS NULL OR anterior <> 'CORTE') "
+        "ORDER BY id DESC LIMIT 1"
+    )
+    if not ultimo:
+        return None
+    return "LIMITE" if ultimo[0]["corriente"] > ultimo[0]["limite"] else "MANUAL"
+
+
 def ultima_lectura():
     """Lo más reciente que se sabe del dispositivo: primero lo que llegó
     en vivo; si la app acaba de arrancar, lo último guardado."""
@@ -220,19 +255,15 @@ def api_resumen():
         "FROM lecturas WHERE fecha >= ?",
         (hoy,),
     )[0]
-    cortes = consultar(
-        "SELECT COUNT(*) AS cortes FROM ("
-        "  SELECT estado, LAG(estado) OVER (ORDER BY id) AS anterior"
-        "  FROM lecturas WHERE fecha >= ?"
-        ") WHERE estado = 'CORTE' AND (anterior IS NULL OR anterior <> 'CORTE')",
-        (hoy,),
-    )[0]
+    manana = (datetime.now().date() + timedelta(days=1)).isoformat()
+    cortes = consultar(SQL_CORTES, (hoy, manana))
     return jsonify({
         "ultima": ultima_lectura(),
+        "motivo_corte": motivo_corte_actual(),
         "maximo": metricas["maximo"],
         "promedio": metricas["promedio"],
         "total": metricas["total"],
-        "cortes": cortes["cortes"],
+        **contar_motivos(cortes),
     })
 
 
@@ -314,16 +345,8 @@ def api_reporte():
         rango,
     )
 
-    cortes = consultar(
-        "SELECT fecha, corriente FROM ("
-        "  SELECT fecha, corriente, estado, LAG(estado) OVER (ORDER BY id) AS anterior"
-        "  FROM lecturas WHERE fecha >= ? AND fecha < ?"
-        ") WHERE estado = 'CORTE' AND (anterior IS NULL OR anterior <> 'CORTE') "
-        "ORDER BY fecha DESC",
-        rango,
-    )
-
-    resumen["cortes"] = len(cortes)
+    cortes = consultar(SQL_CORTES, rango)
+    resumen.update(contar_motivos(cortes))
     return jsonify({
         "periodo": periodo,
         "desde": inicio.isoformat(),

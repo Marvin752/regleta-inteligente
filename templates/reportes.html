@@ -48,6 +48,9 @@
         <div class="card p-3 h-100">
           <div class="etiqueta">Cortes</div>
           <div class="valor"><span id="cortes">--</span></div>
+          <div class="small" style="color: var(--tenue);">
+            <span id="cortes-limite">0</span> por límite · <span id="cortes-manual">0</span> manuales
+          </div>
         </div>
       </div>
     </div>
@@ -83,7 +86,7 @@
           <div class="table-responsive">
             <table class="table table-sm align-middle mb-0">
               <thead>
-                <tr><th>Fecha</th><th>Hora</th><th class="text-end">Corriente</th></tr>
+                <tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th class="text-end">Corriente</th></tr>
               </thead>
               <tbody id="filas-cortes"></tbody>
             </table>
@@ -107,6 +110,7 @@
     const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
                    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
     const NOMBRE_PERIODO = { dia: "Diario", semana: "Semanal", mes: "Mensual", anio: "Anual" };
+    const NOMBRE_MOTIVO = { LIMITE: "Por límite", MANUAL: "Manual" };
     const NOMBRE_GRUPO = { dia: "Hora", semana: "Día", mes: "Día", anio: "Mes" };
 
     let periodo = "dia";
@@ -207,7 +211,11 @@
     const tablaCortes = crearPaginador("filas-cortes", "paginas-cortes", (fila, c) => {
       fila.insertCell().textContent = fechaCorta(c.fecha.slice(0, 10));
       fila.insertCell().textContent = c.fecha.slice(11);
-      celdaDerecha(fila, num(c.corriente) + " A", "text-danger");
+      const tipo = document.createElement("span");
+      tipo.className = "badge " + (c.motivo === "LIMITE" ? "text-bg-danger" : "text-bg-secondary");
+      tipo.textContent = NOMBRE_MOTIVO[c.motivo];
+      fila.insertCell().appendChild(tipo);
+      celdaDerecha(fila, num(c.corriente) + " A", c.motivo === "LIMITE" ? "text-danger" : "");
     });
 
     // ---------- Gráfica ----------
@@ -271,6 +279,8 @@
       $("maximo").textContent = num(r.resumen.maximo);
       $("promedio").textContent = num(r.resumen.promedio);
       $("cortes").textContent = r.resumen.cortes;
+      $("cortes-limite").textContent = r.resumen.cortes_limite;
+      $("cortes-manual").textContent = r.resumen.cortes_manual;
 
       const grupo = NOMBRE_GRUPO[r.periodo];
       $("titulo-grafica").textContent = "Consumo por " + grupo.toLowerCase();
@@ -417,7 +427,8 @@
 
       // Tabla de cortes
       if (y > alto - 40) { doc.addPage(); y = 20; }
-      titulo("Cortes del período (" + r.cortes.length + ")", y);
+      titulo("Cortes del período (" + r.resumen.cortes_limite + " por límite, " +
+             r.resumen.cortes_manual + " manuales)", y);
       if (r.cortes.length === 0) {
         doc.setTextColor(...GRIS);
         doc.setFont("helvetica", "normal");
@@ -427,14 +438,21 @@
         doc.autoTable({
           ...estiloTabla,
           startY: y + 3,
-          head: [["#", "Fecha", "Hora", aLaDerecha("Corriente")]],
+          head: [["#", "Fecha", "Hora", "Tipo", aLaDerecha("Corriente")]],
           body: r.cortes.map((c, i) => [
             i + 1,
             fechaCorta(c.fecha.slice(0, 10)),
             c.fecha.slice(11),
+            NOMBRE_MOTIVO[c.motivo],
             num(c.corriente) + " A",
           ]),
-          columnStyles: { 0: { cellWidth: 12 }, 3: derecha },
+          columnStyles: { 0: { cellWidth: 12 }, 4: derecha },
+          didParseCell: (celda) => {
+            if (celda.section === "body" && celda.column.index === 3 && celda.cell.raw === "Por límite") {
+              celda.cell.styles.textColor = [214, 40, 57];
+              celda.cell.styles.fontStyle = "bold";
+            }
+          },
         });
       }
 

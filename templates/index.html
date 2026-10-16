@@ -11,9 +11,9 @@
   <div id="aviso" class="aviso-corte p-3 mb-3 d-none">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
       <div>
-        <div class="fw-bold text-danger">Relé abierto</div>
-        <div class="small" style="color: var(--tenue);">
-          El circuito está sin energía. Revisá la carga antes de reactivar.
+        <div class="fw-bold text-danger" id="aviso-titulo">Relé abierto</div>
+        <div class="small" style="color: var(--tenue);" id="aviso-texto">
+          El circuito está sin energía.
         </div>
       </div>
       <button id="boton-rearmar" class="btn btn-danger">Reactivar relé</button>
@@ -56,6 +56,9 @@
       <div class="card p-3 h-100">
         <div class="etiqueta">Cortes de hoy</div>
         <div class="valor"><span id="cortes">--</span></div>
+        <div class="small" style="color: var(--tenue);">
+          <span id="cortes-limite">0</span> por límite · <span id="cortes-manual">0</span> manuales
+        </div>
       </div>
     </div>
   </div>
@@ -133,6 +136,8 @@
       $("maximo").textContent = num(r.maximo);
       $("promedio").textContent = num(r.promedio);
       $("cortes").textContent = r.cortes ?? "--";
+      $("cortes-limite").textContent = r.cortes_limite ?? 0;
+      $("cortes-manual").textContent = r.cortes_manual ?? 0;
       $("total").textContent = r.total ?? 0;
 
       if (!r.ultima) {
@@ -147,7 +152,21 @@
       $("limite").textContent = num(r.ultima.limite);
       pintarEstado(r.ultima.estado, enCorte ? "text-bg-danger" : "text-bg-success");
       $("aviso").classList.toggle("d-none", !enCorte);
+      if (enCorte) pintarMotivo(r.motivo_corte);
       $("control").classList.toggle("d-none", enCorte);
+    }
+
+    const MOTIVOS = {
+      LIMITE: ["Relé abierto por sobrecorriente",
+               "La corriente pasó del límite. Revisá la carga antes de reactivar."],
+      MANUAL: ["Relé abierto manualmente",
+               "Alguien cortó la energía desde la app."],
+    };
+
+    function pintarMotivo(motivo) {
+      const [titulo, texto] = MOTIVOS[motivo] || ["Relé abierto", "El circuito está sin energía."];
+      $("aviso-titulo").textContent = titulo;
+      $("aviso-texto").textContent = texto;
     }
 
     function pintarGrafica(lecturas) {
