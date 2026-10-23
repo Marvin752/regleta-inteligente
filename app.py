@@ -5,6 +5,7 @@ import sqlite3
 from collections import deque
 from datetime import date, datetime, timedelta
 from functools import wraps
+from zoneinfo import ZoneInfo
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
@@ -19,7 +20,15 @@ MQTT_PASS = os.environ["MQTT_PASS"]
 MQTT_PORT = 8883
 TOPIC_ESTADO = "proyectoiot/jutiapa/estado"
 TOPIC_COMANDO = "proyectoiot/jutiapa/comando"
-DB = "lecturas.db"
+# En Railway la base va en el volumen; en tu compu, en la carpeta del proyecto.
+DB = os.path.join(os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "."), "lecturas.db")
+
+# Los servidores en la nube usan hora UTC; las fechas se guardan en hora de Guatemala.
+ZONA = ZoneInfo("America/Guatemala")
+
+
+def ahora():
+    return datetime.now(ZONA).replace(tzinfo=None)
 
 APP_USER = os.environ["APP_USER"]
 APP_PASS = os.environ["APP_PASS"]
@@ -150,7 +159,7 @@ def al_recibir(client, userdata, msg):
     try:
         dato = json.loads(msg.payload.decode())
         lectura = {
-            "fecha": datetime.now().isoformat(timespec="seconds"),
+            "fecha": ahora().isoformat(timespec="seconds"),
             "dispositivo": str(dato["dispositivo"]),
             "corriente": float(dato["corriente"]),
             "limite": float(dato["limite"]),
@@ -173,7 +182,9 @@ def crear_cliente_mqtt():
     cliente.tls_set()
     cliente.on_connect = al_conectar
     cliente.on_message = al_recibir
-    cliente.connect(MQTT_HOST, MQTT_PORT)
+    # connect_async no detiene el arranque si el broker tarda; loop_start
+    # se encarga de conectar y de reconectar si se cae la conexión.
+    cliente.connect_async(MQTT_HOST, MQTT_PORT)
     return cliente
 
 
@@ -249,13 +260,13 @@ def api_lecturas():
 @app.route("/api/resumen")
 @requiere_login
 def api_resumen():
-    hoy = datetime.now().date().isoformat()
+    hoy = ahora().date().isoformat()
     metricas = consultar(
         "SELECT COUNT(*) AS total, MAX(corriente) AS maximo, AVG(corriente) AS promedio "
         "FROM lecturas WHERE fecha >= ?",
         (hoy,),
     )[0]
-    manana = (datetime.now().date() + timedelta(days=1)).isoformat()
+    manana = (ahora().date() + timedelta(days=1)).isoformat()
     cortes = consultar(SQL_CORTES, (hoy, manana))
     return jsonify({
         "ultima": ultima_lectura(),
@@ -316,7 +327,7 @@ def api_reporte():
     try:
         dia = date.fromisoformat(request.args.get("fecha", ""))
     except ValueError:
-        dia = date.today()
+        dia = ahora().date()
 
     inicio, fin = rango_periodo(periodo, dia)
     rango = (inicio.isoformat(), fin.isoformat())
@@ -359,8 +370,10 @@ def api_reporte():
 
 # ---------- Arranque ----------
 
+# Esto corre al cargar el archivo, tanto con "python app.py" como con gunicorn.
+crear_tabla()
+cliente_mqtt = crear_cliente_mqtt()
+cliente_mqtt.loop_start()
+
 if __name__ == "__main__":
-    crear_tabla()
-    cliente_mqtt = crear_cliente_mqtt()
-    cliente_mqtt.loop_start()
-    app.run(port=5000)
+    app.run(port=int(os.environ.get("PORT", 5000)))
