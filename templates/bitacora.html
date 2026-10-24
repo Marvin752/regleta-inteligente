@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block titulo %}Bitácora · Monitor de energía{% endblock %}
+
+{% block contenido %}
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
+    <div>
+      <h1 class="h4 fw-bold mb-1">Bitácora</h1>
+      <div class="etiqueta">Todo lo que pasó en el sistema, del más reciente al más antiguo</div>
+    </div>
+    <select id="filtro" class="form-select" style="width: auto;" aria-label="Filtrar por tipo">
+      <option value="">Todos los eventos</option>
+      <option value="CORTE">Cortes y reactivaciones</option>
+      <option value="ORDEN">Órdenes enviadas</option>
+      <option value="CONEXION">Conexión del dispositivo</option>
+      <option value="HORARIO">Horarios</option>
+      <option value="SESION">Sesiones</option>
+    </select>
+  </div>
+
+  <div class="card p-3">
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr><th>Fecha</th><th>Hora</th><th>Evento</th><th>Detalle</th><th>Usuario</th></tr>
+        </thead>
+        <tbody id="filas"></tbody>
+      </table>
+    </div>
+    <div id="vacio" class="small tenue mt-2 d-none">No hay eventos para mostrar.</div>
+    <div id="paginas" class="pt-3"></div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const POR_PAGINA = 15;
+
+    // tipo de evento -> [texto, color de la etiqueta, grupo del filtro]
+    const TIPOS = {
+      CORTE_LIMITE:    ["Corte por límite", "text-bg-danger", "CORTE"],
+      CORTE_MANUAL:    ["Corte manual", "text-bg-secondary", "CORTE"],
+      REACTIVACION:    ["Reactivación", "text-bg-success", "CORTE"],
+      ORDEN_CORTAR:    ["Orden: cortar", "text-bg-warning", "ORDEN"],
+      ORDEN_REARMAR:   ["Orden: reactivar", "text-bg-info", "ORDEN"],
+      DESCONEXION:     ["Desconexión", "text-bg-warning", "CONEXION"],
+      RECONEXION:      ["Reconexión", "text-bg-success", "CONEXION"],
+      HORARIO:         ["Horario nuevo", "text-bg-primary", "HORARIO"],
+      HORARIO_OMITIDO: ["Horario omitido", "text-bg-dark", "HORARIO"],
+      LOGIN:           ["Inicio de sesión", "text-bg-dark", "SESION"],
+      LOGIN_FALLIDO:   ["Acceso fallido", "text-bg-danger", "SESION"],
+      AJUSTES:         ["Ajustes", "text-bg-primary", "SESION"],
+    };
+
+    const fechaCorta = (iso) => iso.slice(8, 10) + "/" + iso.slice(5, 7) + "/" + iso.slice(0, 4);
+
+    let eventos = [];
+    let pagina = 1;
+
+    function pintar() {
+      const grupo = $("filtro").value;
+      const visibles = eventos.filter((e) => !grupo || (TIPOS[e.tipo] || [])[2] === grupo);
+      const totalPaginas = Math.max(1, Math.ceil(visibles.length / POR_PAGINA));
+      pagina = Math.min(Math.max(pagina, 1), totalPaginas);
+
+      const cuerpo = $("filas");
+      cuerpo.replaceChildren();
+      const inicio = (pagina - 1) * POR_PAGINA;
+      for (const e of visibles.slice(inicio, inicio + POR_PAGINA)) {
+        const [texto, color] = TIPOS[e.tipo] || [e.tipo, "text-bg-secondary"];
+        const fila = cuerpo.insertRow();
+        fila.insertCell().textContent = fechaCorta(e.fecha.slice(0, 10));
+        fila.insertCell().textContent = e.fecha.slice(11);
+        const insignia = document.createElement("span");
+        insignia.className = "badge " + color;
+        insignia.textContent = texto;
+        fila.insertCell().appendChild(insignia);
+        fila.insertCell().textContent = e.detalle;
+        const usuario = fila.insertCell();
+        usuario.className = "tenue";
+        usuario.textContent = e.usuario || "sistema";
+      }
+      $("vacio").classList.toggle("d-none", visibles.length > 0);
+
+      const controles = $("paginas");
+      controles.replaceChildren();
+      if (totalPaginas === 1) return;
+      const barra = document.createElement("div");
+      barra.className = "d-flex justify-content-between align-items-center";
+      const boton = (texto, destino, deshabilitado) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "btn btn-sm btn-outline-secondary";
+        b.textContent = texto;
+        b.disabled = deshabilitado;
+        b.addEventListener("click", () => { pagina = destino; pintar(); });
+        return b;
+      };
+      const info = document.createElement("span");
+      info.className = "small tenue";
+      info.textContent = "Página " + pagina + " de " + totalPaginas;
+      barra.append(boton("‹ Anterior", pagina - 1, pagina === 1), info,
+                   boton("Siguiente ›", pagina + 1, pagina === totalPaginas));
+      controles.appendChild(barra);
+    }
+
+    async function cargar() {
+      try {
+        eventos = await pedir("/api/eventos");
+        pintar();
+      } catch (error) {
+        $("vacio").textContent = "No se pudo cargar la bitácora.";
+        $("vacio").classList.remove("d-none");
+      }
+    }
+
+    $("filtro").addEventListener("change", () => { pagina = 1; pintar(); });
+    cargar();
+    setInterval(cargar, 15000);
+  </script>
+{% endblock %}

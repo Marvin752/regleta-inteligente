@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+
+{% block titulo %}Ajustes · Monitor de energía{% endblock %}
+
+{% block contenido %}
+  <h1 class="h4 fw-bold mb-3">Ajustes y horarios</h1>
+
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <div class="card p-3 mb-3">
+        <div class="etiqueta mb-1">Cálculo de energía y costo</div>
+        <p class="small tenue">
+          El sensor mide corriente. Para estimar la energía se multiplica por el voltaje de la red,
+          y el costo sale de la tarifa por kWh de tu recibo de luz.
+        </p>
+        <form id="form-ajustes">
+          <label class="form-label" for="tarifa">Tarifa (Q por kWh)</label>
+          <input class="form-control mb-3" id="tarifa" type="number" step="0.01" min="0" max="100" required>
+          <label class="form-label" for="voltaje">Voltaje de la red (V)</label>
+          <input class="form-control mb-3" id="voltaje" type="number" step="1" min="90" max="260" required>
+          <button class="btn btn-primary" type="submit">Guardar</button>
+        </form>
+      </div>
+
+      <div class="card p-3">
+        <div class="etiqueta mb-1">Avisos por Telegram</div>
+        <p class="small tenue mb-2" id="telegram-estado">Revisando…</p>
+        <button class="btn btn-outline-primary btn-sm d-none" id="boton-prueba" type="button">
+          Mandar mensaje de prueba
+        </button>
+      </div>
+    </div>
+
+    <div class="col-lg-7">
+      <div class="card p-3">
+        <div class="etiqueta mb-1">Horarios programados</div>
+        <p class="small tenue">
+          La app manda la orden sola a la hora indicada. Por seguridad, una reactivación programada
+          no se ejecuta si el relé se abrió por sobrecorriente: eso solo se reactiva a mano.
+        </p>
+
+        <form id="form-horario" class="row g-2 align-items-end mb-3">
+          <div class="col-6 col-md-3">
+            <label class="form-label" for="hora">Hora</label>
+            <input class="form-control" id="hora" type="time" required>
+          </div>
+          <div class="col-6 col-md-3">
+            <label class="form-label" for="accion">Acción</label>
+            <select class="form-select" id="accion">
+              <option value="CORTAR">Cortar</option>
+              <option value="REARMAR">Reactivar</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-6">
+            <div class="form-label">Días</div>
+            <div class="d-flex flex-wrap gap-1" id="dias"></div>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary" type="submit">Agregar horario</button>
+          </div>
+        </form>
+
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr><th>Hora</th><th>Acción</th><th>Días</th><th>Activo</th><th></th></tr>
+            </thead>
+            <tbody id="filas-horarios"></tbody>
+          </table>
+        </div>
+        <div id="sin-horarios" class="small tenue mt-2 d-none">Todavía no hay horarios.</div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script>
+    const alerta = Swal.mixin({ background: "#182032", color: "#e6eaf2" });
+    const DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+    function avisar(resultado) {
+      alerta.fire({
+        icon: resultado.ok ? "success" : "error",
+        title: resultado.mensaje,
+        timer: 1800,
+        showConfirmButton: false,
+      });
+    }
+
+    // ---------- Ajustes ----------
+
+    async function cargarAjustes() {
+      const a = await pedir("/api/ajustes");
+      $("tarifa").value = a.tarifa_kwh;
+      $("voltaje").value = a.voltaje;
+      if (a.telegram) {
+        $("telegram-estado").textContent = "Activos: llegan avisos de cortes, reactivaciones y desconexiones.";
+        $("boton-prueba").classList.remove("d-none");
+      } else {
+        $("telegram-estado").textContent =
+          "No configurados. Agregá TELEGRAM_TOKEN y TELEGRAM_CHAT_ID en las variables de la app.";
+      }
+    }
+
+    $("form-ajustes").addEventListener("submit", async (evento) => {
+      evento.preventDefault();
+      avisar(await enviar("/api/ajustes", "POST", {
+        tarifa_kwh: $("tarifa").value,
+        voltaje: $("voltaje").value,
+      }));
+    });
+
+    $("boton-prueba").addEventListener("click", async () => {
+      avisar(await enviar("/api/telegram/prueba", "POST"));
+    });
+
+    // ---------- Horarios ----------
+
+    // Casillas de días: lunes a viernes marcados por defecto
+    DIAS.forEach((nombre, i) => {
+      const id = "dia-" + i;
+      const caja = document.createElement("input");
+      caja.type = "checkbox";
+      caja.className = "btn-check";
+      caja.id = id;
+      caja.value = i;
+      caja.checked = i < 5;
+      const etiqueta = document.createElement("label");
+      etiqueta.className = "btn btn-sm btn-outline-primary";
+      etiqueta.htmlFor = id;
+      etiqueta.textContent = nombre;
+      $("dias").append(caja, etiqueta);
+    });
+
+    function textoDias(dias) {
+      if (dias === "0123456") return "Todos los días";
+      if (dias === "01234") return "Lunes a viernes";
+      if (dias === "56") return "Fines de semana";
+      return [...dias].map((d) => DIAS[Number(d)]).join(", ");
+    }
+
+    async function cargarHorarios() {
+      const horarios = await pedir("/api/horarios");
+      const cuerpo = $("filas-horarios");
+      cuerpo.replaceChildren();
+      for (const h of horarios) {
+        const fila = cuerpo.insertRow();
+        fila.insertCell().textContent = h.hora;
+
+        const accion = document.createElement("span");
+        accion.className = "badge " + (h.accion === "CORTAR" ? "text-bg-danger" : "text-bg-success");
+        accion.textContent = h.accion === "CORTAR" ? "Cortar" : "Reactivar";
+        fila.insertCell().appendChild(accion);
+
+        fila.insertCell().textContent = textoDias(h.dias);
+
+        const interruptor = document.createElement("div");
+        interruptor.className = "form-check form-switch m-0";
+        const casilla = document.createElement("input");
+        casilla.type = "checkbox";
+        casilla.className = "form-check-input";
+        casilla.checked = !!h.activo;
+        casilla.setAttribute("aria-label", "Activo");
+        casilla.addEventListener("change", async () => {
+          avisar(await enviar("/api/horarios/" + h.id, "PATCH", { activo: casilla.checked }));
+        });
+        interruptor.appendChild(casilla);
+        fila.insertCell().appendChild(interruptor);
+
+        const borrar = document.createElement("button");
+        borrar.type = "button";
+        borrar.className = "btn btn-sm btn-outline-danger";
+        borrar.textContent = "Eliminar";
+        borrar.addEventListener("click", async () => {
+          const decision = await alerta.fire({
+            icon: "warning",
+            title: "¿Eliminar este horario?",
+            showCancelButton: true,
+            confirmButtonText: "Sí, eliminar",
+            cancelButtonText: "Cancelar",
+            confirmButtonColor: "#dc3545",
+          });
+          if (!decision.isConfirmed) return;
+          avisar(await enviar("/api/horarios/" + h.id, "DELETE"));
+          cargarHorarios();
+        });
+        const celda = fila.insertCell();
+        celda.className = "text-end";
+        celda.appendChild(borrar);
+      }
+      $("sin-horarios").classList.toggle("d-none", horarios.length > 0);
+    }
+
+    $("form-horario").addEventListener("submit", async (evento) => {
+      evento.preventDefault();
+      const dias = [...document.querySelectorAll("#dias input:checked")].map((c) => c.value).join("");
+      const resultado = await enviar("/api/horarios", "POST", {
+        hora: $("hora").value,
+        accion: $("accion").value,
+        dias,
+      });
+      avisar(resultado);
+      if (resultado.ok) cargarHorarios();
+    });
+
+    cargarAjustes();
+    cargarHorarios();
+  </script>
+{% endblock %}

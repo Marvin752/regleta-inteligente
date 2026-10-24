@@ -3,6 +3,12 @@
 {% block titulo %}Reportes · Monitor de energía{% endblock %}
 
 {% block contenido %}
+  <style>
+    .mapa-calor { border-collapse: separate; border-spacing: 3px; font-size: .7rem; }
+    .mapa-calor th { color: var(--tenue); font-weight: 400; text-align: center; padding: 0 2px; }
+    .mapa-calor th.dia { text-align: right; padding-right: 6px; white-space: nowrap; }
+    .mapa-calor td { width: 26px; height: 22px; border-radius: 4px; background: #1f2940; }
+  </style>
   <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
     <div>
       <h1 class="h4 fw-bold mb-1">Reportes</h1>
@@ -17,6 +23,7 @@
       </div>
       <input type="date" id="fecha" class="form-control" style="width: auto;" aria-label="Fecha">
       <button type="button" id="boton-pdf" class="btn btn-primary" data-usuario="{{ usuario }}" disabled>Descargar PDF</button>
+      <button type="button" id="boton-csv" class="btn btn-outline-primary" disabled>Exportar Excel</button>
     </div>
   </div>
 
@@ -36,12 +43,14 @@
         <div class="card p-3 h-100">
           <div class="etiqueta">Máximo</div>
           <div class="valor"><span id="maximo">--</span> <small>A</small></div>
+          <div class="small tenue">Promedio: <span id="promedio">--</span> A</div>
         </div>
       </div>
       <div class="col-6 col-lg-3">
         <div class="card p-3 h-100">
-          <div class="etiqueta">Promedio</div>
-          <div class="valor"><span id="promedio">--</span> <small>A</small></div>
+          <div class="etiqueta">Energía</div>
+          <div class="valor"><span id="energia">--</span> <small>kWh</small></div>
+          <div class="small tenue">Costo estimado: <span id="costo">--</span></div>
         </div>
       </div>
       <div class="col-6 col-lg-3">
@@ -49,7 +58,7 @@
           <div class="etiqueta">Cortes</div>
           <div class="valor"><span id="cortes">--</span></div>
           <div class="small" style="color: var(--tenue);">
-            <span id="cortes-limite">0</span> por límite · <span id="cortes-manual">0</span> manuales
+            <span id="cortes-limite">0</span> por límite · <span id="cortes-manual">0</span> manual(es)
           </div>
         </div>
       </div>
@@ -72,6 +81,8 @@
                   <th class="text-end">Lecturas</th>
                   <th class="text-end">Promedio</th>
                   <th class="text-end">Máximo</th>
+                  <th class="text-end">kWh</th>
+                  <th class="text-end">Costo</th>
                 </tr>
               </thead>
               <tbody id="filas-detalle"></tbody>
@@ -97,6 +108,20 @@
           <div id="paginas-cortes" class="mt-auto pt-3"></div>
         </div>
       </div>
+    </div>
+    <div class="small tenue mt-2" id="nota-energia"></div>
+  </div>
+
+  <div class="card p-3 mt-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <div>
+        <div class="etiqueta">Patrón de consumo · últimos 30 días</div>
+        <div class="small tenue">Energía por día de la semana y hora. Más intenso = más consumo.</div>
+      </div>
+      <div class="small tenue" id="mapa-maximo"></div>
+    </div>
+    <div class="table-responsive">
+      <table class="mapa-calor" id="mapa"></table>
     </div>
   </div>
 {% endblock %}
@@ -206,6 +231,8 @@
       celdaDerecha(fila, miles(s.lecturas));
       celdaDerecha(fila, num(s.promedio) + " A");
       celdaDerecha(fila, num(s.maximo) + " A");
+      celdaDerecha(fila, num(s.energia_kwh, 3));
+      celdaDerecha(fila, quetzales(s.costo));
     });
 
     const tablaCortes = crearPaginador("filas-cortes", "paginas-cortes", (fila, c) => {
@@ -273,11 +300,15 @@
       $("vacio").classList.toggle("d-none", hayDatos);
       $("reporte").classList.toggle("d-none", !hayDatos);
       $("boton-pdf").disabled = !hayDatos;
+      $("boton-csv").disabled = !hayDatos;
       if (!hayDatos) return;
 
       $("total").textContent = miles(r.resumen.total);
       $("maximo").textContent = num(r.resumen.maximo);
       $("promedio").textContent = num(r.resumen.promedio);
+      $("energia").textContent = num(r.resumen.energia_kwh, 3);
+      $("costo").textContent = quetzales(r.resumen.costo);
+      $("nota-energia").textContent = notaEnergia(r);
       $("cortes").textContent = r.resumen.cortes;
       $("cortes-limite").textContent = r.resumen.cortes_limite;
       $("cortes-manual").textContent = r.resumen.cortes_manual;
@@ -303,8 +334,62 @@
       } catch (error) {
         ultimoReporte = null;
         $("boton-pdf").disabled = true;
+        $("boton-csv").disabled = true;
         $("rango").textContent = "No se pudo cargar el reporte";
       }
+    }
+
+    function notaEnergia(r) {
+      return "Energía estimada con " + num(r.voltaje, 0) + " V y tarifa de " +
+             quetzales(r.tarifa_kwh) + " por kWh (se cambian en Ajustes). " +
+             "El sensor mide corriente, así que el valor es aproximado.";
+    }
+
+    // ---------- Excel ----------
+
+    $("boton-csv").addEventListener("click", () => {
+      const fecha = $("fecha").value || hoyLocal();
+      window.location.href = "/api/exportar?periodo=" + periodo + "&fecha=" + fecha;
+    });
+
+    // ---------- Mapa de calor ----------
+
+    const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+
+    async function cargarMapa() {
+      let datos;
+      try {
+        datos = await pedir("/api/mapa");
+      } catch (error) {
+        return;
+      }
+      const maximo = Math.max(0, ...datos.wh.flat());
+      $("mapa-maximo").textContent = maximo > 0 ? "Máximo: " + num(maximo, 1) + " Wh en una hora" : "Sin consumo registrado";
+
+      const tabla = $("mapa");
+      tabla.replaceChildren();
+      const cabecera = tabla.insertRow();
+      cabecera.appendChild(document.createElement("th"));
+      for (let h = 0; h < 24; h++) {
+        const th = document.createElement("th");
+        th.textContent = h % 3 === 0 ? h : "";
+        cabecera.appendChild(th);
+      }
+      datos.wh.forEach((horas, d) => {
+        const fila = tabla.insertRow();
+        const th = document.createElement("th");
+        th.className = "dia";
+        th.textContent = DIAS[d].slice(0, 3);
+        fila.appendChild(th);
+        horas.forEach((wh, h) => {
+          const celda = fila.insertCell();
+          if (wh > 0 && maximo > 0) {
+            const intensidad = 0.15 + 0.85 * (wh / maximo);
+            celda.style.background = "rgba(77, 163, 255, " + intensidad.toFixed(2) + ")";
+          }
+          celda.title = DIAS[d] + " " + String(h).padStart(2, "0") + ":00 · " + num(wh, 1) + " Wh";
+        });
+      });
     }
 
     // ---------- PDF ----------
@@ -365,11 +450,12 @@
       const tarjetas = [
         ["Lecturas", miles(r.resumen.total)],
         ["Máximo", num(r.resumen.maximo) + " A"],
-        ["Promedio", num(r.resumen.promedio) + " A"],
+        ["Energía", num(r.resumen.energia_kwh, 3) + " kWh"],
+        ["Costo est.", quetzales(r.resumen.costo)],
         ["Cortes", String(r.resumen.cortes)],
       ];
       const separacion = 4;
-      const anchoTarjeta = (util - separacion * 3) / 4;
+      const anchoTarjeta = (util - separacion * (tarjetas.length - 1)) / tarjetas.length;
       let y = 38;
       tarjetas.forEach(([titulo, valor], i) => {
         const x = margen + i * (anchoTarjeta + separacion);
@@ -382,7 +468,7 @@
         doc.text(titulo.toUpperCase(), x + 4, y + 7);
         doc.setTextColor(...AZUL);
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(15);
+        doc.setFontSize(12);
         doc.text(valor, x + 4, y + 15.5);
       });
       y += 28;
@@ -414,21 +500,29 @@
       doc.autoTable({
         ...estiloTabla,
         startY: y + 3,
-        head: [[grupo, aLaDerecha("Lecturas"), aLaDerecha("Promedio"), aLaDerecha("Máximo")]],
+        head: [[grupo, aLaDerecha("Lecturas"), aLaDerecha("Promedio"), aLaDerecha("Máximo"),
+                aLaDerecha("kWh"), aLaDerecha("Costo")]],
         body: r.serie.map((s) => [
           etiquetaGrupo(s.etiqueta, r.periodo),
           miles(s.lecturas),
           num(s.promedio) + " A",
           num(s.maximo) + " A",
+          num(s.energia_kwh, 3),
+          quetzales(s.costo),
         ]),
-        columnStyles: { 1: derecha, 2: derecha, 3: derecha },
+        columnStyles: { 1: derecha, 2: derecha, 3: derecha, 4: derecha, 5: derecha },
       });
-      y = doc.lastAutoTable.finalY + 10;
+      y = doc.lastAutoTable.finalY + 5;
+      doc.setTextColor(...GRIS);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text(doc.splitTextToSize(notaEnergia(r), util), margen, y);
+      y += 12;
 
       // Tabla de cortes
       if (y > alto - 40) { doc.addPage(); y = 20; }
       titulo("Cortes del período (" + r.resumen.cortes_limite + " por límite, " +
-             r.resumen.cortes_manual + " manuales)", y);
+             r.resumen.cortes_manual + " manual(es))", y);
       if (r.cortes.length === 0) {
         doc.setTextColor(...GRIS);
         doc.setFont("helvetica", "normal");
@@ -493,5 +587,6 @@
     $("fecha").value = hoyLocal();
     $("fecha").addEventListener("change", cargar);
     cargar();
+    cargarMapa();
   </script>
 {% endblock %}

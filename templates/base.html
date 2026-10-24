@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block titulo %}Monitor de energía{% endblock %}</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <style>
     :root {
       --fondo: #0f1420;
@@ -30,6 +31,7 @@
       font-variant-numeric: tabular-nums;
     }
     .valor small { font-size: 1rem; font-weight: 400; color: var(--tenue); }
+    .tenue { color: var(--tenue); }
     .grafica-caja { height: 300px; }
     .table { --bs-table-bg: transparent; font-variant-numeric: tabular-nums; }
     .aviso-corte {
@@ -37,14 +39,88 @@
       border: 1px solid #ff5d6c;
       border-radius: 14px;
     }
-    .menu-lateral { background: var(--panel); width: 260px; }
-    .menu-lateral .list-group-item {
-      background: transparent;
-      border: 0;
-      border-radius: 10px;
-      margin-bottom: 4px;
+    /* ---------- Menú lateral ---------- */
+    .menu-lateral {
+      --bs-offcanvas-width: 300px;
+      background: linear-gradient(180deg, #172036 0%, #111827 100%);
+      border-right: 1px solid var(--borde);
     }
-    .menu-lateral .list-group-item.active { background: #2b6fd6; }
+    .menu-marca {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .menu-marca img {
+      width: 44px;
+      height: 44px;
+      padding: 6px;
+      border-radius: 12px;
+      background: rgba(77, 163, 255, .12);
+      border: 1px solid rgba(77, 163, 255, .3);
+    }
+    .menu-marca .nombre { font-weight: 700; line-height: 1.1; }
+    .menu-marca .sub { font-size: .75rem; color: var(--tenue); }
+    .menu-seccion {
+      font-size: .7rem;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--tenue);
+      margin: 1.25rem 0 .5rem .5rem;
+    }
+    .menu-enlace {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 10px 12px;
+      margin-bottom: 4px;
+      border-radius: 12px;
+      color: #d6dcea;
+      text-decoration: none;
+      border: 1px solid transparent;
+      transition: background .15s, border-color .15s;
+    }
+    .menu-enlace:hover { background: rgba(255, 255, 255, .05); color: #fff; }
+    .menu-enlace .icono {
+      flex: 0 0 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, .05);
+      font-size: 1.1rem;
+    }
+    .menu-enlace .titulo { font-weight: 600; line-height: 1.2; }
+    .menu-enlace .desc { font-size: .75rem; color: var(--tenue); }
+    .menu-enlace.activo {
+      background: rgba(77, 163, 255, .14);
+      border-color: rgba(77, 163, 255, .35);
+      color: #fff;
+    }
+    .menu-enlace.activo .icono { background: #2b6fd6; color: #fff; }
+    .menu-pie {
+      border-top: 1px solid var(--borde);
+      padding-top: 1rem;
+      font-size: .8rem;
+      color: var(--tenue);
+    }
+    .menu-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #2b6fd6;
+      color: #fff;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .punto {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
   </style>
 </head>
 <body>
@@ -60,7 +136,7 @@
       </div>
       <div class="d-flex align-items-center gap-3">
         {% block navbar_extra %}{% endblock %}
-        <span class="small d-none d-sm-inline" style="color: var(--tenue);">{{ usuario }}</span>
+        <span class="small d-none d-sm-inline tenue">{{ usuario }}</span>
         <form method="post" action="/logout" class="m-0">
           <button class="btn btn-sm btn-outline-secondary" type="submit">Salir</button>
         </form>
@@ -70,17 +146,49 @@
 
   <div class="offcanvas offcanvas-start menu-lateral" tabindex="-1" id="menu" aria-labelledby="menu-titulo">
     <div class="offcanvas-header">
-      <h5 class="offcanvas-title" id="menu-titulo">Menú</h5>
+      <div class="menu-marca">
+        <img src="{{ url_for('static', filename='img/logo.png') }}" alt="">
+        <div>
+          <div class="nombre" id="menu-titulo">Monitor de energía</div>
+          <div class="sub">Regleta inteligente · IoT</div>
+        </div>
+      </div>
       <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Cerrar"></button>
     </div>
-    <div class="offcanvas-body">
-      <div class="list-group">
-        <a href="/" class="list-group-item list-group-item-action {% if pagina == 'dashboard' %}active{% endif %}">
-          Dashboard
+    <div class="offcanvas-body d-flex flex-column pt-0">
+      <nav>
+        <div class="menu-seccion">Monitoreo</div>
+        <a href="/" class="menu-enlace {% if pagina == 'dashboard' %}activo{% endif %}">
+          <span class="icono"><i class="bi bi-speedometer2"></i></span>
+          <span><span class="d-block titulo">Dashboard</span><span class="desc">Consumo y control en vivo</span></span>
         </a>
-        <a href="/reportes" class="list-group-item list-group-item-action {% if pagina == 'reportes' %}active{% endif %}">
-          Reportes
+        <a href="/reportes" class="menu-enlace {% if pagina == 'reportes' %}activo{% endif %}">
+          <span class="icono"><i class="bi bi-bar-chart-line"></i></span>
+          <span><span class="d-block titulo">Reportes</span><span class="desc">Historial, energía y costo</span></span>
         </a>
+
+        <div class="menu-seccion">Sistema</div>
+        <a href="/bitacora" class="menu-enlace {% if pagina == 'bitacora' %}activo{% endif %}">
+          <span class="icono"><i class="bi bi-journal-text"></i></span>
+          <span><span class="d-block titulo">Bitácora</span><span class="desc">Cortes, órdenes y eventos</span></span>
+        </a>
+        <a href="/ajustes" class="menu-enlace {% if pagina == 'ajustes' %}activo{% endif %}">
+          <span class="icono"><i class="bi bi-sliders"></i></span>
+          <span><span class="d-block titulo">Ajustes y horarios</span><span class="desc">Tarifa, programación y avisos</span></span>
+        </a>
+      </nav>
+
+      <div class="menu-pie mt-auto d-flex align-items-center gap-2">
+        <div class="menu-avatar">{{ (usuario or "?")[:1] }}</div>
+        <div class="flex-grow-1">
+          <div class="text-light fw-semibold">{{ usuario }}</div>
+          <div>Sesión iniciada</div>
+        </div>
+        <form method="post" action="/logout" class="m-0">
+          <button class="btn btn-sm btn-outline-secondary" type="submit" title="Cerrar sesión">
+            <i class="bi bi-box-arrow-right"></i>
+          </button>
+        </form>
       </div>
     </div>
   </div>
@@ -94,7 +202,8 @@
   <script>
     // Utilidades compartidas por todas las páginas
     const $ = (id) => document.getElementById(id);
-    const num = (v) => (v === null || v === undefined) ? "--" : Number(v).toFixed(2);
+    const num = (v, decimales = 2) => (v === null || v === undefined) ? "--" : Number(v).toFixed(decimales);
+    const quetzales = (v) => "Q" + Number(v || 0).toFixed(2);
 
     // Pide datos a la API; si la sesión venció, manda al login
     async function pedir(url, opciones) {
@@ -104,6 +213,15 @@
         throw new Error("Sesión vencida");
       }
       return respuesta.json();
+    }
+
+    // Manda datos en JSON (para guardar, crear o borrar)
+    function enviar(url, metodo, datos) {
+      return pedir(url, {
+        method: metodo,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(datos || {}),
+      });
     }
 
     Chart.defaults.color = "#8a97b1";

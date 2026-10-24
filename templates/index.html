@@ -3,6 +3,7 @@
 {% block titulo %}Dashboard · Monitor de energía{% endblock %}
 
 {% block navbar_extra %}
+  <span id="conexion" class="small tenue d-none d-md-inline"><span class="punto bg-secondary"></span>Sin datos</span>
   <span id="estado" class="badge fs-6 text-bg-secondary">SIN DATOS</span>
 {% endblock %}
 
@@ -44,12 +45,14 @@
       <div class="card p-3 h-100">
         <div class="etiqueta">Máximo de hoy</div>
         <div class="valor"><span id="maximo">--</span> <small>A</small></div>
+        <div class="small tenue">Promedio: <span id="promedio">--</span> A</div>
       </div>
     </div>
     <div class="col-6 col-lg-3">
       <div class="card p-3 h-100">
-        <div class="etiqueta">Promedio de hoy</div>
-        <div class="valor"><span id="promedio">--</span> <small>A</small></div>
+        <div class="etiqueta">Energía de hoy</div>
+        <div class="valor"><span id="energia">--</span> <small>kWh</small></div>
+        <div class="small tenue">Costo estimado: <span id="costo">--</span></div>
       </div>
     </div>
     <div class="col-6 col-lg-3">
@@ -57,7 +60,7 @@
         <div class="etiqueta">Cortes de hoy</div>
         <div class="valor"><span id="cortes">--</span></div>
         <div class="small" style="color: var(--tenue);">
-          <span id="cortes-limite">0</span> por límite · <span id="cortes-manual">0</span> manuales
+          <span id="cortes-limite">0</span> por límite · <span id="cortes-manual">0</span> manual(es)
         </div>
       </div>
     </div>
@@ -139,6 +142,9 @@
       $("cortes-limite").textContent = r.cortes_limite ?? 0;
       $("cortes-manual").textContent = r.cortes_manual ?? 0;
       $("total").textContent = r.total ?? 0;
+      $("energia").textContent = num(r.energia_kwh, 3);
+      $("costo").textContent = quetzales(r.costo);
+      pintarConexion(r.en_linea, r.segundos_sin_datos);
 
       if (!r.ultima) {
         pintarEstado("SIN DATOS", "text-bg-secondary");
@@ -154,6 +160,31 @@
       $("aviso").classList.toggle("d-none", !enCorte);
       if (enCorte) pintarMotivo(r.motivo_corte);
       $("control").classList.toggle("d-none", enCorte);
+    }
+
+    function haceCuanto(segundos) {
+      if (segundos < 60) return Math.round(segundos) + " s";
+      if (segundos < 3600) return Math.round(segundos / 60) + " min";
+      if (segundos < 86400) return Math.round(segundos / 3600) + " h";
+      return Math.round(segundos / 86400) + " d";
+    }
+
+    function pintarConexion(enLinea, segundos) {
+      const caja = $("conexion");
+      caja.replaceChildren();
+      const punto = document.createElement("span");
+      let texto;
+      if (segundos === null || segundos === undefined) {
+        punto.className = "punto bg-secondary";
+        texto = "Sin datos";
+      } else if (enLinea) {
+        punto.className = "punto bg-success";
+        texto = "ESP32 en línea";
+      } else {
+        punto.className = "punto bg-warning";
+        texto = "ESP32 desconectado hace " + haceCuanto(segundos);
+      }
+      caja.append(punto, texto);
     }
 
     const MOTIVOS = {
