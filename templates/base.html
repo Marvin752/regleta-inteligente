@@ -121,6 +121,59 @@
       border-radius: 50%;
       margin-right: 6px;
     }
+    /* ---------- Asistente ---------- */
+    .burbuja-ia {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 1040;
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      border: 0;
+      color: #fff;
+      font-size: 1.5rem;
+      background: linear-gradient(135deg, #4da3ff, #7b5cff);
+      box-shadow: 0 10px 30px rgba(77, 120, 255, .45);
+      transition: transform .15s;
+    }
+    .burbuja-ia:hover { transform: scale(1.07); }
+    .burbuja-ia { padding: 0; overflow: hidden; }
+    /* El JPG trae un fondo oscuro alrededor del círculo: se agranda un poco y
+       el botón (overflow: hidden) recorta ese borde */
+    .burbuja-foto { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; transform: scale(1.25); }
+    .rem-mini { width: 30px; height: 30px; border-radius: 50%; overflow: hidden; flex: 0 0 30px; }
+    .rem-mini img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.25); }
+    /* ---------- Marca de la barra superior ---------- */
+    .marca-logo { width: 30px; height: 30px; object-fit: contain;
+                  filter: drop-shadow(0 0 6px rgba(77, 163, 255, .45)); }
+    .panel-ia {
+      --bs-offcanvas-width: 520px;
+      background: #121a2b;
+      border-left: 1px solid var(--borde);
+    }
+    .chat-mensajes { flex: 1; overflow-y: auto; padding: 4px 2px; }
+    .msj { max-width: 88%; padding: 10px 14px; border-radius: 14px; margin-bottom: 10px;
+           line-height: 1.45; font-size: .93rem; white-space: normal; word-wrap: break-word; }
+    .msj-usuario { margin-left: auto; background: #2b6fd6; color: #fff; border-bottom-right-radius: 4px; }
+    .msj-ia { background: var(--panel); border: 1px solid var(--borde); border-bottom-left-radius: 4px; }
+    .msj-error { background: rgba(255, 93, 108, .12); border: 1px solid #ff5d6c; }
+    .tabla-ia { font-size: .8rem; --bs-table-bg: transparent; }
+    .tabla-ia th, .tabla-ia td { padding: 4px 6px; white-space: normal; }
+    .msj-ia { max-width: 100%; }
+    .sugerencia {
+      display: block; width: 100%; text-align: left; margin-bottom: 8px;
+      padding: 9px 12px; border-radius: 10px; font-size: .88rem;
+      background: rgba(77, 163, 255, .08); border: 1px solid rgba(77, 163, 255, .25); color: #d6dcea;
+    }
+    .sugerencia:hover { background: rgba(77, 163, 255, .16); }
+    .escribiendo span {
+      display: inline-block; width: 7px; height: 7px; margin-right: 3px; border-radius: 50%;
+      background: var(--tenue); animation: salto 1s infinite;
+    }
+    .escribiendo span:nth-child(2) { animation-delay: .15s; }
+    .escribiendo span:nth-child(3) { animation-delay: .3s; }
+    @keyframes salto { 0%, 60%, 100% { opacity: .3; } 30% { opacity: 1; } }
   </style>
 </head>
 <body>
@@ -132,7 +185,10 @@
                 data-bs-target="#menu" aria-controls="menu" aria-label="Abrir menú">
           <span class="navbar-toggler-icon"></span>
         </button>
-        <span class="navbar-brand fw-bold mb-0">⚡ Monitor de energía</span>
+        <a href="/" class="navbar-brand fw-bold mb-0 d-flex align-items-center gap-2">
+          <img src="{{ url_for('static', filename='img/logo.png') }}" alt="" class="marca-logo">
+          Monitor de energía
+        </a>
       </div>
       <div class="d-flex align-items-center gap-3">
         {% block navbar_extra %}{% endblock %}
@@ -197,6 +253,44 @@
     {% block contenido %}{% endblock %}
   </main>
 
+  <!-- Asistente de IA -->
+  <button class="burbuja-ia" type="button" data-bs-toggle="offcanvas" data-bs-target="#asistente"
+          aria-controls="asistente" title="Preguntale a Rem">
+    <img src="{{ url_for('static', filename='img/RemIcon.jpg') }}" alt="Rem" class="burbuja-foto">
+  </button>
+
+  <div class="offcanvas offcanvas-end panel-ia" tabindex="-1" id="asistente" aria-labelledby="asistente-titulo">
+    <div class="offcanvas-header border-bottom" style="border-color: var(--borde) !important;">
+      <div class="d-flex align-items-center gap-2">
+        <span class="rem-mini"><img src="{{ url_for('static', filename='img/RemIcon.jpg') }}" alt=""></span>
+        <div>
+          <h5 class="offcanvas-title mb-0" id="asistente-titulo">Rem</h5>
+          <div class="small tenue">Tu asistente del monitor · también te avisa por Telegram</div>
+        </div>
+      </div>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Cerrar"></button>
+    </div>
+    <div class="offcanvas-body d-flex flex-column">
+      <div class="chat-mensajes" id="chat-mensajes">
+        <div class="msj msj-ia">
+          Hola, soy Rem. Vigilo la regleta y te aviso por Telegram cuando algo pasa; aquí podés preguntarme lo que quieras sobre el consumo, los cortes o los costos.
+        </div>
+        <div id="chat-sugerencias">
+          <button class="sugerencia" type="button">¿Cuánto consumí y gasté este mes?</button>
+          <button class="sugerencia" type="button">¿A qué hora ocurren más cortes por sobrecorriente?</button>
+          <button class="sugerencia" type="button">Compará esta semana con la anterior</button>
+          <button class="sugerencia" type="button">¿Qué día de la semana se consume más?</button>
+        </div>
+      </div>
+      <form id="chat-formulario" class="d-flex gap-2 pt-2 border-top" style="border-color: var(--borde) !important;">
+        <input class="form-control" id="chat-entrada" placeholder="Preguntale a Rem…" autocomplete="off" maxlength="500">
+        <button class="btn btn-primary" type="submit" id="chat-enviar" aria-label="Enviar">
+          <i class="bi bi-send"></i>
+        </button>
+      </form>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
@@ -226,6 +320,99 @@
 
     Chart.defaults.color = "#8a97b1";
     Chart.defaults.borderColor = "#263149";
+  </script>
+  <script>
+    // ---------- Asistente de IA ----------
+    (() => {
+      const historial = [];
+      const caja = $("chat-mensajes");
+
+      // Convierte el texto de la IA a HTML seguro: escapa todo y solo permite
+      // negritas, títulos, listas y tablas en formato Markdown.
+      function enLinea(t) {
+        return t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+      }
+
+      function formatear(texto) {
+        const seguro = texto.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const lineas = seguro.split("\n");
+        const html = [];
+        let i = 0;
+        while (i < lineas.length) {
+          const linea = lineas[i].trim();
+          if (linea.startsWith("|")) {
+            const filas = [];
+            while (i < lineas.length && lineas[i].trim().startsWith("|")) {
+              const celdas = lineas[i].trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+              if (!celdas.every((c) => /^:?-{2,}:?$/.test(c))) filas.push(celdas);
+              i++;
+            }
+            const [cabecera, ...cuerpo] = filas;
+            html.push('<div class="table-responsive my-2"><table class="table table-sm tabla-ia mb-0"><thead><tr>' +
+              cabecera.map((c) => "<th>" + enLinea(c) + "</th>").join("") + "</tr></thead><tbody>" +
+              cuerpo.map((f) => "<tr>" + f.map((c) => "<td>" + enLinea(c) + "</td>").join("") + "</tr>").join("") +
+              "</tbody></table></div>");
+            continue;
+          }
+          if (/^#{1,4} /.test(linea)) html.push('<div class="fw-bold mt-2">' + enLinea(linea.replace(/^#+ /, "")) + "</div>");
+          else if (/^[-*] /.test(linea)) html.push("• " + enLinea(linea.slice(2)) + "<br>");
+          else if (linea === "") html.push("<br>");
+          else html.push(enLinea(linea) + "<br>");
+          i++;
+        }
+        return html.join("").replace(/(<br>)+$/, "");
+      }
+
+      function agregar(clase, texto) {
+        const div = document.createElement("div");
+        div.className = "msj " + clase;
+        if (clase === "msj-usuario") div.textContent = texto;
+        else div.innerHTML = formatear(texto);
+        caja.appendChild(div);
+        caja.scrollTop = caja.scrollHeight;
+        return div;
+      }
+
+      async function preguntar(texto) {
+        texto = texto.trim();
+        if (!texto) return;
+        $("chat-sugerencias")?.remove();
+        agregar("msj-usuario", texto);
+        historial.push({ role: "user", content: texto });
+
+        const espera = agregar("msj-ia", "");
+        espera.innerHTML = '<span class="escribiendo"><span></span><span></span><span></span></span>';
+        $("chat-entrada").disabled = $("chat-enviar").disabled = true;
+        try {
+          const r = await enviar("/api/chat", "POST", { mensajes: historial.slice(-10) });
+          espera.remove();
+          if (r.ok) {
+            agregar("msj-ia", r.respuesta);
+            historial.push({ role: "assistant", content: r.respuesta });
+          } else {
+            agregar("msj-ia msj-error", r.mensaje);
+            historial.pop();
+          }
+        } catch (error) {
+          espera.remove();
+          agregar("msj-ia msj-error", "No me pude conectar. Intentá de nuevo.");
+          historial.pop();
+        } finally {
+          $("chat-entrada").disabled = $("chat-enviar").disabled = false;
+          $("chat-entrada").focus();
+        }
+      }
+
+      $("chat-formulario").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const texto = $("chat-entrada").value;
+        $("chat-entrada").value = "";
+        preguntar(texto);
+      });
+      document.querySelectorAll(".sugerencia").forEach((b) =>
+        b.addEventListener("click", () => preguntar(b.textContent)));
+      $("asistente").addEventListener("shown.bs.offcanvas", () => $("chat-entrada").focus());
+    })();
   </script>
   {% block scripts %}{% endblock %}
 </body>
